@@ -12,8 +12,9 @@ import { REFERENCE_TIMEZONE } from "@/server/campaigns/compose";
 import { SEVERITY_LABEL, TYPE_LABEL, buildDiagnosticsView, parseDiagnosticFilters } from "@/server/campaigns/diagnostics/view";
 import { filtersToQuery, parseFilters } from "@/server/campaigns/period";
 import { readCampaignDiagnostics } from "@/server/campaigns/read";
+import { pageTitle } from "@/brand";
 
-export const metadata = { title: "Diagnóstico de campanhas — v0-saas" };
+export const metadata = { title: pageTitle("Diagnóstico de campanhas") };
 
 function Section({ title, hint, items }: { title: string; hint: string; items: CampaignDiagnostic[] }) {
   if (items.length === 0) return null;
@@ -124,7 +125,7 @@ export default async function DiagnosticosPage(props: PageProps<"/campanhas/diag
 
       {view.findings.length + view.inconclusive.length + view.limitations.length === 0 ? (
         <EmptyState
-          icon={Stethoscope}
+          iconElement={<Stethoscope className="size-6 text-muted-foreground" aria-hidden />}
           title="Nenhum diagnóstico com estes filtros"
           description="Nenhuma regra encontrou sinal suficiente no período, e não há limitação de dados a relatar."
         />

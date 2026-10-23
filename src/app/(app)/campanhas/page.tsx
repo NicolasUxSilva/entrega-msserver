@@ -15,8 +15,9 @@ import { requireWorkspace } from "@/server/auth";
 import { REFERENCE_TIMEZONE } from "@/server/campaigns/compose";
 import { filtersToQuery, parseFilters } from "@/server/campaigns/period";
 import { readCampaignsOverview } from "@/server/campaigns/read";
+import { pageTitle } from "@/brand";
 
-export const metadata = { title: "Campanhas — v0-saas" };
+export const metadata = { title: pageTitle("Campanhas") };
 
 export default async function CampanhasPage(props: PageProps<"/campanhas">) {
   const { workspaceId } = await requireWorkspace();
@@ -70,7 +71,7 @@ export default async function CampanhasPage(props: PageProps<"/campanhas">) {
 
       {!anyConnected ? (
         <EmptyState
-          icon={Megaphone}
+          iconElement={<Megaphone className="size-6 text-muted-foreground" aria-hidden />}
           title="Nenhuma plataforma de mídia paga conectada"
           description="Conecte o Google Ads ou o Meta Ads em Conexões e rode a primeira importação para ver as campanhas aqui."
           action={
@@ -81,7 +82,7 @@ export default async function CampanhasPage(props: PageProps<"/campanhas">) {
         />
       ) : !anyCampaign ? (
         <EmptyState
-          icon={Megaphone}
+          iconElement={<Megaphone className="size-6 text-muted-foreground" aria-hidden />}
           title="Nenhuma campanha com dados neste período"
           description="As contas conectadas não têm veiculação importada no período escolhido. Veja acima o estado de cada importação ou escolha outro período."
         />

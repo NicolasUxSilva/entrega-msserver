@@ -7,8 +7,9 @@ import { isAdvisorEnabled } from "@/server/advisor/flag";
 import { advisorLlmStatus } from "@/server/advisor/llm/config";
 import { defaultReaders } from "@/server/advisor/readers";
 import { requireWorkspace } from "@/server/auth";
+import { pageTitle } from "@/brand";
 
-export const metadata = { title: "Advisor — v0-saas" };
+export const metadata = { title: pageTitle("Advisor") };
 
 function PageHeader() {
   return (
@@ -31,7 +32,7 @@ export default async function AdvisorPage() {
       <div className="mx-auto max-w-3xl space-y-8">
         <PageHeader />
         <EmptyState
-          icon={Sparkles}
+          iconElement={<Sparkles className="size-6 text-muted-foreground" aria-hidden />}
           title="O Advisor está desativado"
           description="O Diagnóstico e as Conexões continuam funcionando normalmente."
         />

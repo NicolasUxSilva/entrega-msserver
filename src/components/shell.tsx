@@ -10,6 +10,7 @@ import { LayoutDashboard, LogOut, Megaphone, Plug, Sparkles } from "lucide-react
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { BrandMark } from "@/components/brand-mark";
 import {
   Avatar,
   AvatarFallback,
@@ -67,7 +68,7 @@ export function AppShell({
     <div className="flex min-h-svh bg-background text-foreground">
       <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground">
         <div className="flex h-14 items-center border-b px-5 font-semibold tracking-tight">
-          v0-saas
+          <BrandMark />
         </div>
         <nav className="flex flex-col gap-1 p-3">
           {NAV.map((item) => {

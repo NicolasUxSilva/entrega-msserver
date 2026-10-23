@@ -12,8 +12,9 @@ import { PLATFORM_LABEL } from "@/server/campaigns/metrics";
 import { diagnosticsForCampaign } from "@/server/campaigns/diagnostics/view";
 import { filtersToQuery, parseFilters } from "@/server/campaigns/period";
 import { readCampaignDetail, readCampaignDiagnostics } from "@/server/campaigns/read";
+import { pageTitle } from "@/brand";
 
-export const metadata = { title: "Campanha — v0-saas" };
+export const metadata = { title: pageTitle("Campanha") };
 
 const isPlatform = (v: string): v is AdPlatform => v === "google_ads" || v === "meta_ads";
 

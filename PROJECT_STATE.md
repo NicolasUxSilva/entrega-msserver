@@ -5,6 +5,9 @@
 > atualizações pontuais de 2026-10-05) e o **registro do ciclo V1, por bloco** (§14–§18). Seções marcadas como
 > "V0" ou "histórico" são registro — o estado atual está no bloco abaixo e em §14–§18.
 
+> **Atualização (2026-10-23) — veja §21.** Este repositório é a **entrega MS Server**, separada do SaaS de origem no
+> commit `01bd416`. Guia de instalação: `docs/entrega-ms-server.md`.
+
 ## Estado atual (2026-10-05)
 
 > **Atualização (2026-10-22) — veja §20.** **Diagnóstico de campanhas** (Fase 2): `/campanhas/diagnosticos` + alertas
@@ -1240,3 +1243,28 @@ real foi usado.**
 assume objetivos comparáveis dentro da mesma definição; a página de campanha recalcula o diagnóstico da plataforma (uma
 leitura a mais); Meta segue sem status; sem histórico de alertas (cada leitura recalcula; ids estáveis permitem persistir
 depois); qualidade comercial (CRM/GA4) é Fase 3.
+
+## 21. Separação — entrega MS Server (2026-10-23)
+
+**Origem.** Cópia independente do repositório `NicolasUxSilva/V0-saas`, commit `01bd416` (Fases 1 e 2), com o histórico
+de commits preservado e a tag `origem-saas-01bd416` no ponto de separação. **Sem remote** apontando para o SaaS: nada
+desta cópia volta para lá, e nada de lá chega aqui sem decisão explícita.
+
+**Mudanças desta separação** (só estas):
+- **Marca centralizada** em `src/brand.ts` (nome "MS Server", único dado verificável) e `src/components/brand-mark.tsx`;
+  títulos de página via `pageTitle()`; `/api/health` responde `service: "ms-server-marketing"`; bloco "MARCA"
+  comentado em `globals.css`; `public/brand/` reservado para o logotipo. Cores, logotipo, tipografia e nome de produto
+  **não foram fornecidos e não foram inventados** — ver `docs/entrega-ms-server.md` §9.
+- **Correção de bug preexistente (Fases 1/2 e Advisor):** páginas server passavam o componente do ícone (`icon={X}`)
+  ao `EmptyState`, que é client — o React recusa funções entre server e client (erro #441 no console, só no estado
+  vazio, ou seja, exatamente o primeiro acesso de uma instalação nova). `EmptyState` ganhou `iconElement` (ícone já
+  renderizado) e as páginas `/campanhas`, `/campanhas/diagnosticos` e `/advisor` passaram a usá-lo. **O SaaS de origem
+  ainda tem o bug.**
+- Documentação: `docs/entrega-ms-server.md`, nota no README e cabeçalho do `.env.example`.
+
+**Verificações (2026-10-23).** `pnpm test` → 1362 passam, 38 opt-in pulados (iguais ao SaaS de origem); `typecheck`,
+`lint` e `build` limpos; `db:migrate` num Postgres 16 **vazio e descartável** aplica 0000–0005 (14 tabelas) e é
+idempotente; leituras das Fases 1 e 2 e isolamento entre workspaces conferidos num banco **sintético** descartável; telas
+de login, Campanhas, Diagnóstico de campanhas, Conexões, Advisor e Diagnóstico renderizadas sem erro de console num
+workspace vazio (plataformas "Não conectada"); varredura de segredos no histórico inteiro sem credencial real (só chaves
+fictícias de teste). **Nenhuma integração real foi conectada ou validada nesta instalação.**

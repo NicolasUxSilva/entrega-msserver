@@ -8,8 +8,9 @@ import {
 import { requireWorkspace } from "@/server/auth";
 import { getGa4ConnectionForWorkspace } from "@/server/connectors/ga4/connection";
 import { getConnectionForWorkspace } from "@/server/connectors/shared/connection";
+import { pageTitle } from "@/brand";
 
-export const metadata = { title: "Conexões — v0-saas" };
+export const metadata = { title: pageTitle("Conexões") };
 
 /** Mensagens compartilhadas do fluxo OAuth (mesmos códigos p/ qualquer provider). */
 const ERROR_MESSAGES: Record<string, string> = {

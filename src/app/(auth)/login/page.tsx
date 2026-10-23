@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
 
 import { getSession, signIn } from "@/server/auth";
+import { pageTitle } from "@/brand";
+import { BrandMark } from "@/components/brand-mark";
 
-export const metadata = { title: "Entrar — v0-saas" };
+export const metadata = { title: pageTitle("Entrar") };
 
 const wrap: React.CSSProperties = {
   maxWidth: "22rem",
@@ -34,7 +36,7 @@ export default async function LoginPage() {
   return (
     <main style={wrap}>
       <h1 style={{ fontSize: "1.375rem", fontWeight: 700, margin: "0 0 0.25rem" }}>
-        v0-saas
+        <BrandMark />
       </h1>
       <p style={{ color: "#555", marginTop: 0 }}>
         Entre para acessar o diagnóstico.

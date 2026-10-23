@@ -9,8 +9,9 @@ import {
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { requireWorkspace } from "@/server/auth";
+import { pageTitle } from "@/brand";
 
-export const metadata = { title: "Estados (dev) — v0-saas" };
+export const metadata = { title: pageTitle("Estados (dev)") };
 
 function Section({
   name,

@@ -63,15 +63,19 @@ export function EmptyState({
   description,
   action,
   icon: Icon = Inbox,
+  iconElement,
 }: {
   title: string;
   description?: string;
   action?: React.ReactNode;
+  /** componente de ícone — só a partir de Client Components (função não atravessa server → client) */
   icon?: LucideIcon;
+  /** ícone já renderizado — use este a partir de Server Components */
+  iconElement?: React.ReactNode;
 }) {
   return (
     <StateShell>
-      <Icon className="size-6 text-muted-foreground" aria-hidden />
+      {iconElement ?? <Icon className="size-6 text-muted-foreground" aria-hidden />}
       <div className="space-y-1">
         <p className="font-medium">{title}</p>
         {description ? (

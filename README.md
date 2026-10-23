@@ -1,3 +1,8 @@
+> **Entrega MS Server.** Este repositório é a versão independente entregue à MS Server (Fases 1 e 2 da solução de
+> tráfego pago), separada do projeto de origem no commit `01bd416`. Instalação, variáveis, OAuth, migrações, deploy e
+> pendências: [`docs/entrega-ms-server.md`](docs/entrega-ms-server.md). O texto abaixo é a documentação técnica herdada
+> do projeto de origem e continua válida para o código.
+
 # v0-saas
 
 Motor de análise e diagnóstico de marketing — **ciclo V1 entregue** (estado em 2026-10-05).

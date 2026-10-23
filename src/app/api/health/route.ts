@@ -1,3 +1,5 @@
+import { BRAND } from "@/brand";
+
 /**
  * Health check — prova que a aplicação sobe e responde.
  *
@@ -9,7 +11,7 @@
 export async function GET() {
   return Response.json({
     status: "ok",
-    service: "v0-saas",
+    service: BRAND.serviceId,
     block: "A0",
     timestamp: new Date().toISOString(),
   });

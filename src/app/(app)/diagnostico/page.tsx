@@ -14,8 +14,9 @@ import { cn } from "@/lib/utils";
 import { requireWorkspace } from "@/server/auth";
 
 import { getDiagnostico } from "./data";
+import { pageTitle } from "@/brand";
 
-export const metadata = { title: "Diagnóstico — v0-saas" };
+export const metadata = { title: pageTitle("Diagnóstico") };
 
 const SUPPRESS_LABEL: Record<string, string> = {
   traffic: "tráfego",

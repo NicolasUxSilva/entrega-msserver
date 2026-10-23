@@ -47,6 +47,13 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/*
+ * MARCA (entrega MS Server) — as cores abaixo ainda são as neutras do projeto original.
+ * As cores oficiais da MS Server NÃO foram fornecidas e não foram inventadas. Quando a
+ * empresa as enviar, ajuste aqui: --primary / --primary-foreground (ações principais),
+ * --sidebar / --sidebar-accent* (barra lateral), --ring (foco) e, se desejado, --chart-*.
+ * Ver docs/entrega-ms-server.md.
+ */
 :root {
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
