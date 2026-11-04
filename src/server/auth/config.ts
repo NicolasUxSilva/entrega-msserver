@@ -13,6 +13,7 @@ import Google from "next-auth/providers/google";
 
 import { env } from "@/env";
 
+import { isSignInAllowed, parseList } from "./allowlist";
 import { ensureUserAndWorkspace } from "./provision";
 import "./types"; // augmentação de Session / JWT
 
@@ -30,9 +31,20 @@ export const authConfig = {
     }),
   ],
   callbacks: {
-    signIn({ user }) {
-      // Sem e-mail do Google não há como identificar/associar o usuário.
-      return Boolean(user?.email);
+    signIn({ user, profile }) {
+      // Sem e-mail do Google não há como identificar/associar o usuário. Além disso, só
+      // entra quem está na lista de e-mails/domínios autorizados (ver ./allowlist).
+      return isSignInAllowed(
+        {
+          email: user?.email,
+          emailVerified: typeof profile?.email_verified === "boolean" ? profile.email_verified : undefined,
+        },
+        {
+          emails: parseList(env.AUTH_ALLOWED_EMAILS),
+          domains: parseList(env.AUTH_ALLOWED_DOMAINS),
+          production: env.NODE_ENV === "production",
+        },
+      );
     },
     async jwt({ token, user }) {
       // `user` só é populado no primeiro passo do login.

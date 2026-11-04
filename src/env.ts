@@ -150,6 +150,21 @@ const schema = z.object({
     emptyToUndefined,
     z.coerce.number().int().min(5_000).max(300_000).default(90_000),
   ),
+
+  // [Acesso] Quem pode entrar pelo login Google (ver src/server/auth/allowlist.ts).
+  // Listas separadas por vírgula. Em PRODUÇÃO, sem nenhuma das duas, ninguém entra.
+  AUTH_ALLOWED_EMAILS: z.preprocess(emptyToUndefined, z.string().min(3).optional()),
+  AUTH_ALLOWED_DOMAINS: z.preprocess(emptyToUndefined, z.string().min(3).optional()),
+
+  // [Sync agendado] Segredo do Vercel Cron (a Vercel o envia como Bearer). PRÓPRIO — não
+  // reutilize AUTH_SECRET. Ausente = rota /api/cron/sync desligada. openssl rand -base64 32
+  CRON_SECRET: z.preprocess(emptyToUndefined, z.string().min(32, "CRON_SECRET deve ter 32+ caracteres").optional()),
+  // [Sync agendado] Workspaces sincronizados automaticamente (uuids separados por vírgula).
+  // Vazio = nenhum (o cadastro é por convite/lista, mas a sync agendada é explícita).
+  SCHEDULED_SYNC_WORKSPACE_IDS: z.preprocess(emptyToUndefined, z.string().optional()),
+  // [Sync agendado] Orçamento de tempo de uma execução (segundos). Deixe abaixo do
+  // maxDuration do plano da Vercel (Hobby 60 s, Pro até 300 s).
+  SCHEDULED_SYNC_BUDGET_SECONDS: z.preprocess(emptyToUndefined, z.coerce.number().int().min(30).max(800).optional()),
 });
 
 const parsed = schema.safeParse(process.env);
