@@ -707,6 +707,37 @@ export const crossSourceInsights = pgTable(
 );
 
 // ─────────────────────────────────────────────────────────────────────
+// Integração serviço-a-serviço (API /api/integration/v1)
+//
+// Uma credencial = um sistema cliente (ex.: Gestão Inteligente da MSServer) com acesso
+// SOMENTE LEITURA a UM workspace. O workspace vem daqui, nunca da requisição.
+// O segredo nunca é guardado: só o SHA-256 dele. `token_id` é a parte pública do token
+// (`v0s_<token_id>_<segredo>`) e serve para localizar a credencial sem varrer hashes.
+// Rotação: emitir a nova, trocar no cliente, revogar a antiga (`revoked_at`).
+// ─────────────────────────────────────────────────────────────────────
+
+export const serviceCredentials = pgTable(
+  "service_credentials",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tokenId: text("token_id").notNull(),
+    secretHash: text("secret_hash").notNull(), // sha256(segredo) em hex
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    name: text("name").notNull(), // quem usa (ex.: "gestao-msserver")
+    scopes: text("scopes").array().notNull(),
+    createdAt: createdAt(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("service_credentials_token_id_uq").on(t.tokenId),
+    index("service_credentials_workspace_idx").on(t.workspaceId),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────
 // Tipos inferidos (usados a partir do bloco A2)
 // ─────────────────────────────────────────────────────────────────────
 
@@ -741,3 +772,5 @@ export type CrossSourceInsightRow = typeof crossSourceInsights.$inferSelect;
 export type NewCrossSourceInsightRow = typeof crossSourceInsights.$inferInsert;
 export type FactAdEntityDaily = typeof factAdEntityDaily.$inferSelect;
 export type NewFactAdEntityDaily = typeof factAdEntityDaily.$inferInsert;
+export type ServiceCredential = typeof serviceCredentials.$inferSelect;
+export type NewServiceCredential = typeof serviceCredentials.$inferInsert;
