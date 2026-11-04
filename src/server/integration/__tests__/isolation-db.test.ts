@@ -218,4 +218,12 @@ describe.skipIf(!DB_URL)("API de integração no Postgres real", () => {
     await sql`update service_credentials set revoked_at = null where token_id = ${A.tokenId}`;
     expect((await call(routes.healthGET, "health", A.token)).status).toBe(200);
   });
+
+  it("a leitura para a sincronização agendada não traz os bytes dos tokens", async () => {
+    const { readConnectionsForSchedule } = await import("@/server/sync/scheduled-read");
+    const rows = await readConnectionsForSchedule([A.ws]);
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.workspaceId === A.ws && r.hasRefreshToken === true && r.hasSelectedAccount === true)).toBe(true);
+    expect(JSON.stringify(rows)).not.toContain(SECRET_BYTES);
+  });
 });
