@@ -72,7 +72,8 @@ export function parseWorkspaceList(raw: string | undefined): Set<string> {
 export interface ScheduledRunResult {
   provider: string;
   connectionId: string;
-  outcome: "success" | "partial" | "failed" | "error" | "deferred";
+  /** `already_running`: outra importação da mesma conexão estava em andamento (nada foi feito) */
+  outcome: "success" | "partial" | "failed" | "error" | "deferred" | "already_running";
   rowsWritten: number | null;
 }
 
@@ -82,7 +83,9 @@ export async function runScheduledSync(input: {
   /** tempo reservado para uma importação: abaixo disso não começa outra */
   perSyncReserveMs: number;
   clock: () => number;
-  runSync: (connectionId: string) => Promise<{ status: "success" | "partial" | "failed"; rowsWritten: number }>;
+  runSync: (
+    connectionId: string,
+  ) => Promise<{ status: "success" | "partial" | "failed"; rowsWritten: number; alreadyRunning?: true }>;
 }): Promise<{ results: ScheduledRunResult[]; skipped: ReturnType<typeof planScheduledSync>["skipped"] }> {
   const start = input.clock();
   const results: ScheduledRunResult[] = [];
@@ -94,7 +97,11 @@ export async function runScheduledSync(input: {
     }
     try {
       const r = await input.runSync(c.id);
-      results.push({ provider: c.provider, connectionId: c.id, outcome: r.status, rowsWritten: r.rowsWritten });
+      results.push(
+        r.alreadyRunning
+          ? { provider: c.provider, connectionId: c.id, outcome: "already_running", rowsWritten: null }
+          : { provider: c.provider, connectionId: c.id, outcome: r.status, rowsWritten: r.rowsWritten },
+      );
     } catch {
       // a mensagem do provedor fica no sync_run/connection (fluxo normal); aqui só o resultado
       results.push({ provider: c.provider, connectionId: c.id, outcome: "error", rowsWritten: null });

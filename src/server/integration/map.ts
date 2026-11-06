@@ -15,6 +15,7 @@ import type { CampaignDiagnostic } from "@/lib/campaign-diagnostics";
 import type { SourceStatus } from "@/lib/insight";
 
 import type { Diagnostic, Source } from "./contract";
+import { computeFreshness, type LastAttempt } from "./freshness";
 
 // ── fontes ────────────────────────────────────────────────────────────
 
@@ -29,14 +30,35 @@ const STATE_MESSAGES: Record<Source["state"], string> = {
   synced: "Dados importados.",
 };
 
-export function toContractSource(s: SourceStatus): Source {
+/** Histórico de importação de uma fonte, para o cálculo de atualidade. */
+export interface SourceRunHistory {
+  lastAttempt: LastAttempt | null;
+  lastFinishedStatus: "success" | "partial" | "failed" | null;
+}
+
+export function toContractSource(
+  s: SourceStatus,
+  history: SourceRunHistory = { lastAttempt: null, lastFinishedStatus: null },
+  clock: { now: Date; today: string } = { now: new Date(), today: new Date().toISOString().slice(0, 10) },
+): Source {
+  const coverage = s.coverage ? { first: s.coverage.first, last: s.coverage.last } : null;
+  const lastSuccessAt = s.lastSyncedAt ? new Date(s.lastSyncedAt) : null;
   return {
     key: s.key,
     label: s.label,
     state: s.health,
     message: STATE_MESSAGES[s.health],
-    last_synced_at: s.lastSyncedAt ? new Date(s.lastSyncedAt).toISOString() : null,
-    coverage: s.coverage ? { first: s.coverage.first, last: s.coverage.last } : null,
+    last_synced_at: lastSuccessAt ? lastSuccessAt.toISOString() : null,
+    coverage,
+    freshness: computeFreshness({
+      state: s.health,
+      lastSuccessAt,
+      lastAttempt: history.lastAttempt,
+      lastFinishedStatus: history.lastFinishedStatus,
+      coverage,
+      now: clock.now,
+      today: clock.today,
+    }),
   };
 }
 

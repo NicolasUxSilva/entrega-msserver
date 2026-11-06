@@ -13,7 +13,9 @@
  *  - nenhuma resposta contém token OAuth cifrado nem texto bruto de erro;
  *  - a API é SOMENTE LEITURA: as rotas rodam numa conexão com
  *    `default_transaction_read_only = on` — qualquer escrita falharia no próprio Postgres;
- *  - a paginação entrega cada linha exatamente uma vez.
+ *  - a paginação entrega cada linha exatamente uma vez;
+ *  - credencial revogada, expirada, forjada ou sem escopo não lê nada;
+ *  - `/sources` informa a atualidade (`freshness`) com os `sync_runs` do próprio workspace.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -214,9 +216,70 @@ describe.skipIf(!DB_URL)("API de integração no Postgres real", () => {
 
   it("credencial revogada ou de outro formato é recusada", async () => {
     await sql`update service_credentials set revoked_at = now() where token_id = ${A.tokenId}`;
-    expect((await call(routes.healthGET, "health", A.token)).status).toBe(401);
+    const revoked = await call(routes.healthGET, "health", A.token);
+    expect(revoked.status).toBe(401);
+    expect(JSON.parse(revoked.text).error.code).toBe("revoked_token");
     await sql`update service_credentials set revoked_at = null where token_id = ${A.tokenId}`;
     expect((await call(routes.healthGET, "health", A.token)).status).toBe(200);
+    expect((await call(routes.healthGET, "health", `${A.token}x`)).status).toBe(401);
+    // mesmo token_id com outro segredo
+    const forged = `v0s_${A.tokenId}_${"A".repeat(43)}`;
+    expect(JSON.parse((await call(routes.healthGET, "health", forged)).text).error.code).toBe("invalid_token");
+  });
+
+  it("credencial expirada é recusada em todas as rotas", async () => {
+    await sql`update service_credentials set expires_at = now() - interval '1 minute' where token_id = ${B.tokenId}`;
+    try {
+      for (const [fn, path] of [
+        [routes.healthGET, "health"],
+        [routes.sourcesGET, "sources"],
+        [routes.trafficGET, "traffic/daily"],
+        [routes.adCampaignsGET, "ads/campaigns/daily"],
+        [routes.diagnosticsGET, "diagnostics"],
+      ] as const) {
+        const r = await call(fn, path, B.token);
+        expect(r.status, path).toBe(401);
+        expect(JSON.parse(r.text).error.code).toBe("expired_token");
+        expect(r.text).not.toContain("Organic");
+      }
+    } finally {
+      await sql`update service_credentials set expires_at = now() + interval '30 days' where token_id = ${B.tokenId}`;
+    }
+  });
+
+  it("credencial sem o escopo marketing:read recebe 403 e nenhum dado", async () => {
+    await sql`update service_credentials set scopes = ${["outro:read"]} where token_id = ${A.tokenId}`;
+    try {
+      const r = await call(routes.trafficGET, "traffic/daily", A.token);
+      expect(r.status).toBe(403);
+      expect(JSON.parse(r.text).error.code).toBe("insufficient_scope");
+      expect(r.text).not.toContain("Organic");
+    } finally {
+      await sql`update service_credentials set scopes = ${["marketing:read"]} where token_id = ${A.tokenId}`;
+    }
+  });
+
+  it("/sources informa atualidade por fonte, com a última importação de verdade", async () => {
+    const body = JSON.parse((await call(routes.sourcesGET, "sources", A.token)).text);
+    const ga4 = body.data.find((s: { key: string }) => s.key === "ga4");
+    const ads = body.data.find((s: { key: string }) => s.key === "google_ads");
+    const meta = body.data.find((s: { key: string }) => s.key === "meta_ads");
+    // GA4 do workspace A: importação bem-sucedida há 2 h, dados até ontem
+    expect(ga4.state).toBe("synced");
+    expect(ga4.freshness).toMatchObject({ status: "fresh", reasons: [], data_through: days.at(-1), data_lag_days: 1 });
+    expect(ga4.freshness.last_attempt.status).toBe("success");
+    expect(ga4.freshness.hours_since_success).toBeGreaterThanOrEqual(1.9);
+    // Google Ads tem dados e conexão ok, mas nenhum sync_run: sem tentativa registrada
+    expect(ads.freshness.last_attempt).toBeNull();
+    // Meta não está conectado: indisponível, nunca "zero"
+    expect(meta.freshness).toMatchObject({ status: "unavailable", reasons: ["not_connected"], data_through: null });
+    // B tem GA4 com erro de conexão: dados existem, mas desatualizados
+    const b = JSON.parse((await call(routes.sourcesGET, "sources", B.token)).text);
+    const bGa4 = b.data.find((s: { key: string }) => s.key === "ga4");
+    expect(bGa4.freshness.status).toBe("stale");
+    expect(bGa4.freshness.reasons).toContain("connection_needs_attention");
+    // a última importação de B não aparece para A (e vice-versa)
+    expect(JSON.stringify(body)).not.toContain(B.ws);
   });
 
   it("a leitura para a sincronização agendada não traz os bytes dos tokens", async () => {

@@ -60,6 +60,20 @@ export const SOURCE_STATES = [
   "synced",
 ] as const;
 
+export const FRESHNESS_STATUSES = ["fresh", "stale", "incomplete", "unavailable"] as const;
+export const FRESHNESS_REASONS = [
+  "not_connected",
+  "no_account",
+  "never_synced",
+  "no_data",
+  "no_successful_sync",
+  "connection_needs_attention",
+  "last_sync_failed",
+  "last_sync_partial",
+  "sync_overdue",
+  "sync_running",
+] as const;
+
 export const sourceSchema = z.object({
   key: z.enum(SOURCE_KEYS),
   label: z.string(),
@@ -70,6 +84,29 @@ export const sourceSchema = z.object({
   last_synced_at: isoInstant.nullable(),
   /** período dos dados já importados; `null` = nenhum dado */
   coverage: z.object({ first: isoDate, last: isoDate }).nullable(),
+  /**
+   * Atualidade dos dados (campo ADITIVO da v1 — ver `./freshness`). `status`:
+   * `fresh` | `stale` | `incomplete` | `unavailable`; `reasons` traz todos os motivos.
+   */
+  freshness: z.object({
+    status: z.enum(FRESHNESS_STATUSES),
+    reasons: z.array(z.enum(FRESHNESS_REASONS)),
+    /** última importação bem-sucedida (inclui `partial`); igual a `last_synced_at` */
+    last_successful_sync_at: isoInstant.nullable(),
+    hours_since_success: z.number().nonnegative().nullable(),
+    stale_after_hours: z.number().int().positive(),
+    last_attempt: z
+      .object({
+        status: z.enum(["running", "success", "partial", "failed"]),
+        started_at: isoInstant,
+        finished_at: isoInstant.nullable(),
+      })
+      .nullable(),
+    /** último dia com dados importados; `null` = nenhum dado (nunca zero) */
+    data_through: isoDate.nullable(),
+    /** dias entre `data_through` e hoje (America/Sao_Paulo); `null` sem dados */
+    data_lag_days: count.nullable(),
+  }),
 });
 
 // ── /traffic/daily (GA4) ──────────────────────────────────────────────

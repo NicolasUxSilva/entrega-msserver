@@ -100,6 +100,26 @@ describe("runScheduledSync", () => {
     ]);
     expect(JSON.stringify(out)).not.toContain("SEGREDO");
   });
+
+  it("importação já em andamento vira already_running (não é falha nem conta linhas)", async () => {
+    const plan = planScheduledSync({
+      allowedWorkspaces: new Set([WS]),
+      now: NOW,
+      connections: [conn({ id: "1", lastSyncedAt: null }), conn({ id: "2", lastSyncedAt: new Date(1) })],
+    });
+    const out = await runScheduledSync({
+      plan,
+      budgetMs: 1_000_000,
+      perSyncReserveMs: 1,
+      clock: () => 0,
+      runSync: async (id) =>
+        id === "1" ? { status: "failed", rowsWritten: 0, alreadyRunning: true } : { status: "success", rowsWritten: 3 },
+    });
+    expect(out.results).toEqual([
+      { provider: "ga4", connectionId: "1", outcome: "already_running", rowsWritten: null },
+      { provider: "ga4", connectionId: "2", outcome: "success", rowsWritten: 3 },
+    ]);
+  });
 });
 
 describe("checkCronAuth", () => {

@@ -54,6 +54,20 @@ function fakeReads(seen: string[]): IntegrationReads {
           message: "Dados importados.",
           last_synced_at: "2026-11-04T09:00:00.000Z",
           coverage: { first: "2026-05-01", last: "2026-11-03" },
+          freshness: {
+            status: "fresh",
+            reasons: [],
+            last_successful_sync_at: "2026-11-04T09:00:00.000Z",
+            hours_since_success: 3,
+            stale_after_hours: 36,
+            last_attempt: {
+              status: "success",
+              started_at: "2026-11-04T08:58:00.000Z",
+              finished_at: "2026-11-04T09:00:00.000Z",
+            },
+            data_through: "2026-11-03",
+            data_lag_days: 1,
+          },
         },
       ]
     ),
@@ -224,6 +238,69 @@ describe("contrato das respostas", () => {
     const r = await s.sources(req("sources", s.a.token));
     expect(r.status).toBe(500);
     expect(await r.text()).not.toContain("ECONNREFUSED");
+  });
+
+  it("banco indisponível nas leituras vira 503 database_unavailable com Retry-After, sem detalhes", async () => {
+    const reads = fakeReads([]);
+    reads.readTraffic = async () => {
+      const driver = Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:5432 user=neondb_owner"), { code: "ECONNREFUSED" });
+      throw new Error("Failed query: select … from fact_traffic_daily", { cause: driver });
+    };
+    const s = setup({ reads });
+    const r = await s.traffic(req("traffic/daily", s.a.token));
+    expect(r.status).toBe(503);
+    expect(r.headers.get("retry-after")).toBe("30");
+    expect(r.headers.get("cache-control")).toBe("no-store");
+    const text = await r.text();
+    expect(JSON.parse(text)).toEqual({
+      error: {
+        code: "database_unavailable",
+        message: "Banco de dados temporariamente indisponível. Tente de novo em instantes; nenhum dado foi alterado.",
+      },
+    });
+    expect(text).not.toMatch(/ECONNREFUSED|10\.0\.0\.5|neondb|fact_traffic|select/);
+    expect(s.logs.at(-1)).toMatchObject({ status: 503, code: "database_unavailable" });
+  });
+
+  it("banco indisponível ao validar a credencial também vira 503 JSON (nunca erro cru)", async () => {
+    const reads = fakeReads([]);
+    const s = setup({ reads });
+    const failing = createIntegrationRoute({
+      scope: "marketing:read",
+      response: healthResponse,
+      handler: async () => ({ data: null }),
+      deps: {
+        findByTokenId: async () => {
+          throw Object.assign(new Error("terminating connection due to administrator command"), { code: "57P01" });
+        },
+        now: () => NOW,
+        log: () => {},
+        limiter: new RateLimiter(),
+      },
+    });
+    const r = await failing(req("health", s.a.token));
+    expect(r.status).toBe(503);
+    expect((await r.json()).error.code).toBe("database_unavailable");
+  });
+
+  it("falha não relacionada ao banco ao validar a credencial vira 500 JSON", async () => {
+    const s = setup();
+    const failing = createIntegrationRoute({
+      scope: "marketing:read",
+      response: healthResponse,
+      handler: async () => ({ data: null }),
+      deps: {
+        findByTokenId: async () => {
+          throw new Error("bug inesperado com detalhe interno");
+        },
+        now: () => NOW,
+        log: () => {},
+        limiter: new RateLimiter(),
+      },
+    });
+    const r = await failing(req("health", s.a.token));
+    expect(r.status).toBe(500);
+    expect(await r.text()).not.toContain("detalhe interno");
   });
 });
 

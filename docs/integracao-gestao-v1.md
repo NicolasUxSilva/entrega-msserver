@@ -24,10 +24,13 @@ Authorization: Bearer v0s_<token_id>_<segredo>
 ### Operação
 
 ```bash
-node --env-file=.env.local scripts/credencial-integracao.mjs workspaces
-node --env-file=.env.local scripts/credencial-integracao.mjs emitir --workspace <uuid> --nome gestao-msserver --dias 180
-node --env-file=.env.local scripts/credencial-integracao.mjs listar --workspace <uuid>
-node --env-file=.env.local scripts/credencial-integracao.mjs revogar --token-id <id>
+# DATABASE_URL só na sessão do shell — NÃO grave a URL de produção em .env.local nem em arquivo
+read -rs DATABASE_URL && export DATABASE_URL
+node scripts/credencial-integracao.mjs workspaces
+node scripts/credencial-integracao.mjs emitir --workspace <uuid> --nome gestao-msserver --dias 180
+node scripts/credencial-integracao.mjs listar --workspace <uuid>
+node scripts/credencial-integracao.mjs revogar --token-id <id>
+unset DATABASE_URL
 ```
 
 **Rotação sem interrupção:** emitir a nova → trocar no cliente → conferir `/health` com a
@@ -52,6 +55,7 @@ nova → revogar a antiga. Entregue o token ao cliente por um canal seguro (nunc
 | 403 | `insufficient_scope` | credencial sem `marketing:read` |
 | 429 | `rate_limited` | mais de 120 req/min por credencial (por instância) |
 | 500 | `internal_error` | erro interno ou resposta fora do contrato (nada é entregue pela metade) |
+| 503 | `database_unavailable` | banco indisponível (rede, conexão recusada/encerrada, excesso de conexões); vem com `Retry-After: 30`. Nenhum detalhe interno na resposta. Mantenha os últimos dados válidos e tente de novo. |
 
 ## Endpoints
 
@@ -62,7 +66,24 @@ Workspace e credencial (nome, escopos, validade). Use para testar a configuraç�
 Uma linha por fonte (`ga4`, `google_ads`, `meta_ads`, `rd_station_marketing`, `rd_station_crm`):
 `state` (`synced`, `needs_reauth`, `error`, `sync_failed`, `no_account`, `never_synced`,
 `no_data`, `not_connected`), `message` (frase fixa por estado — **nunca** o texto de erro do
-provedor), `last_synced_at`, `coverage {first,last}`.
+provedor), `last_synced_at` (última importação bem-sucedida, inclusive `partial`),
+`coverage {first,last}` e **`freshness`** (campo aditivo da v1):
+
+| campo | significado |
+|---|---|
+| `status` | `fresh` (atualizada e completa) · `stale` (há dados, mas a fonte deixou de atualizar) · `incomplete` (atualizada, mas a última importação terminou `partial`) · `unavailable` (não há dados utilizáveis) |
+| `reasons` | todos os motivos: `not_connected`, `no_account`, `never_synced`, `no_data`, `no_successful_sync`, `connection_needs_attention` (reconectar/erro — as próximas importações não vão acontecer), `last_sync_failed`, `last_sync_partial`, `sync_overdue` (mais de `stale_after_hours` sem sucesso), `sync_running` |
+| `last_successful_sync_at` | igual a `last_synced_at` |
+| `hours_since_success` | horas desde a última importação bem-sucedida; `null` = nunca |
+| `stale_after_hours` | limite usado (36 h: sincronização diária + folga) |
+| `last_attempt` | `{status, started_at, finished_at}` da última tentativa (`running`, `success`, `partial`, `failed`); `null` = nenhuma registrada |
+| `data_through` | último dia com dados importados; `null` = nenhum dado |
+| `data_lag_days` | dias entre `data_through` e hoje (America/Sao_Paulo); `null` sem dados |
+
+Regras para o cliente: **ausência de dado nunca é zero** — fonte `unavailable` não tem
+indicadores, e um dia sem linha em `/traffic` ou `/ads` é dia sem dado importado, não
+"zero sessões". Só trate como atual o que vier com `freshness.status = "fresh"`; mostre
+`stale`/`incomplete` com aviso. Use `coverage` para saber quais dias um intervalo cobre.
 
 ### `GET /api/integration/v1/traffic/daily?from=&to=&limit=&cursor=`
 GA4 por dia × canal (`sessionDefaultChannelGroup`): `sessions`, `engaged_sessions`,
@@ -114,32 +135,56 @@ de `SCHEDULED_SYNC_WORKSPACE_IDS`. Orçamento de tempo por execução
 (`SCHEDULED_SYNC_BUDGET_SECONDS`, padrão 270 s): o que não couber fica para o dia seguinte,
 começando pelas importações mais antigas.
 
+**Uma importação por conexão de cada vez** (`src/server/sync/lock.ts`): o cron e o botão
+"Importar" passam pela mesma trava. Se já há uma importação da conexão em andamento
+(`sync_runs` `running` com menos de 15 min), a nova não começa: o botão mostra o aviso e o
+cron registra `already_running`. Um `running` mais antigo que 15 min é considerado
+abandonado e não bloqueia. A trava não cria tabela nem altera linhas existentes.
+Com o banco indisponível, a rota responde `503 database_unavailable` (sem detalhes).
+
 ## Login (cadastro)
 
-`AUTH_ALLOWED_EMAILS` / `AUTH_ALLOWED_DOMAINS` definem quem entra. E-mail precisa estar
-verificado pelo Google. **Em produção, sem nenhuma das duas listas, ninguém entra.**
+Regra (`src/server/auth/allowlist.ts`):
+
+1. O e-mail precisa estar **verificado pelo Google** — vale para todos.
+2. **Quem já tem conta** (linha em `users`) **entra sempre**: a lista não bloqueia usuários
+   atuais, e esquecer de configurá-la não tranca ninguém que já usa o sistema.
+3. **Conta nova** só entra se o e-mail estiver em `AUTH_ALLOWED_EMAILS` ou o domínio em
+   `AUTH_ALLOWED_DOMAINS` (domínio exato; subdomínio não vale).
+4. Sem nenhuma das duas listas: em produção, contas novas **não** entram (as existentes
+   sim); fora de produção, entra qualquer e-mail verificado.
+
+Recusas vão para o log como `sign_in_denied` com o motivo e só o domínio (nunca o e-mail
+completo). Para tirar o acesso de quem já tem conta, é preciso removê-lo do banco.
+**Antes de publicar, revise a tabela `users`**: o cadastro era aberto, então ela pode ter
+contas que não deveriam continuar entrando.
 
 ## Testes
 
 ```bash
 pnpm test                                    # inclui os testes da integração (sem banco)
 INTEGRATION_TEST_DB_URL=postgres://…/descartavel pnpm exec vitest run \
-  src/server/integration/__tests__/isolation-db.test.ts
+  src/server/integration/__tests__/isolation-db.test.ts src/server/sync/__tests__/lock-db.test.ts
 ```
 
 A suíte com banco é opt-in, **apaga e recria dados de teste** e deve rodar só num banco
 descartável com as migrações aplicadas. Ela prova isolamento entre workspaces, ausência de
 tokens/erros brutos nas respostas, paginação sem repetição e que as rotas não escrevem nada
-(rodam numa conexão `default_transaction_read_only = on`).
+(rodam numa conexão `default_transaction_read_only = on`), credencial revogada, expirada,
+forjada ou sem escopo, e o `freshness` de `/sources`. `lock-db.test.ts` prova que 8
+tentativas simultâneas da mesma conexão iniciam uma só importação, que um `running`
+abandonado não bloqueia e que usuários existentes são reconhecidos no login.
 
 ## Checklist para publicar (responsável: Nicolas)
 
 1. Revisar e integrar a branch `integracao/gestao-v1`.
 2. Aplicar a migração `0006_service_credentials` (só cria uma tabela nova).
-3. Configurar na Vercel: `AUTH_ALLOWED_EMAILS` e/ou `AUTH_ALLOWED_DOMAINS` (**antes** do
-   deploy — sem elas ninguém entra), `CRON_SECRET`, `SCHEDULED_SYNC_WORKSPACE_IDS`,
-   `SCHEDULED_SYNC_BUDGET_SECONDS` (Hobby: até 50; Pro: até 270).
-4. Conferir a região das funções da Vercel (perto do Neon `sa-east-1` → `gru1`).
+3. Configurar na Vercel: `AUTH_ALLOWED_EMAILS` e/ou `AUTH_ALLOWED_DOMAINS` (só restringem
+   contas **novas**; as existentes continuam entrando), `CRON_SECRET`,
+   `SCHEDULED_SYNC_WORKSPACE_IDS`, `SCHEDULED_SYNC_BUDGET_SECONDS` (Hobby: até 50; Pro: até 270).
+4. Conferir a região das funções da Vercel perto do banco (ex.: Neon `sa-east-1` → `gru1`),
+   via `regions` no `vercel.json` ou no painel — o `preferredRegion` no código está
+   obsoleto no Next 16.
 5. Emitir a credencial `gestao-msserver` para o workspace da MSServer e entregar o token
    à MSServer por canal seguro.
 6. Publicar o app OAuth do Google em produção (em "Testing" o refresh token do GA4 expira

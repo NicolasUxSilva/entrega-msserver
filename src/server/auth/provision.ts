@@ -7,7 +7,7 @@
  *
  * Não importa nada de `./index` (evita ciclo: index -> config -> provision).
  */
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db";
 import { users, workspaceMembers, workspaces } from "@/server/db/schema";
@@ -23,6 +23,19 @@ export interface UserWorkspace {
 function deriveWorkspaceName(name: string | null, email: string): string {
   const who = name?.trim() || email.split("@")[0] || "conta";
   return `Workspace de ${who}`;
+}
+
+/**
+ * O e-mail já tem conta? Usado pela regra de login (`./allowlist`) para nunca bloquear
+ * quem já usa o sistema. Comparação sem diferenciar maiúsculas; só lê `users.id`.
+ */
+export async function userExistsByEmail(email: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(sql`lower(${users.email}) = ${email.trim().toLowerCase()}`)
+    .limit(1);
+  return Boolean(row);
 }
 
 export async function ensureUserAndWorkspace(input: {

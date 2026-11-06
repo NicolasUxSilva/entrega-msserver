@@ -8,6 +8,8 @@
  */
 import type { z } from "zod";
 
+import { DATABASE_RETRY_AFTER_SECONDS, isDatabaseUnavailable } from "@/server/db/unavailable";
+
 import { CONTRACT_VERSION } from "./contract";
 import { authenticate, type AuthenticatedClient, type IntegrationScope, type StoredCredential } from "./credentials";
 import { ParamError } from "./map";
@@ -67,6 +69,7 @@ const MESSAGES: Record<string, string> = {
   rate_limited: "Muitas requisições: tente de novo em um minuto.",
   invalid_params: "Parâmetros inválidos.",
   internal_error: "Erro interno. Nenhum dado foi alterado.",
+  database_unavailable: "Banco de dados temporariamente indisponível. Tente de novo em instantes; nenhum dado foi alterado.",
 };
 
 function errorResponse(status: number, code: string, message?: string, extra: Record<string, string> = {}): Response {
@@ -90,12 +93,18 @@ export function createIntegrationRoute(opts: {
     const url = new URL(request.url);
     const logBase = { event: "integration_request", path: url.pathname };
 
-    const auth = await authenticate({
-      authorization: request.headers.get("authorization"),
-      requiredScope: opts.scope,
-      now,
-      findByTokenId: deps.findByTokenId,
-    });
+    let auth: Awaited<ReturnType<typeof authenticate>>;
+    try {
+      auth = await authenticate({
+        authorization: request.headers.get("authorization"),
+        requiredScope: opts.scope,
+        now,
+        findByTokenId: deps.findByTokenId,
+      });
+    } catch (err) {
+      // a busca da credencial também depende do banco: nunca deixar a falha escapar crua
+      return failure(err, logBase, {}, started, deps);
+    }
     if (!auth.ok) {
       deps.log({ ...logBase, status: auth.status, code: auth.code, ms: Date.now() - started });
       return errorResponse(auth.status, auth.code, undefined, auth.status === 401 ? { "www-authenticate": "Bearer" } : {});
@@ -129,8 +138,23 @@ export function createIntegrationRoute(opts: {
         deps.log({ ...logBase, ...who, status: 400, ms: Date.now() - started });
         return errorResponse(400, "invalid_params", err.message);
       }
-      deps.log({ ...logBase, ...who, status: 500, code: "internal_error", ms: Date.now() - started });
-      return errorResponse(500, "internal_error");
+      return failure(err, logBase, who, started, deps);
     }
   };
+}
+
+/** 503 padronizado se o banco caiu; 500 genérico para o resto. Nunca repassa a mensagem. */
+function failure(
+  err: unknown,
+  logBase: Record<string, unknown>,
+  who: Record<string, unknown>,
+  started: number,
+  deps: IntegrationDeps,
+): Response {
+  if (isDatabaseUnavailable(err)) {
+    deps.log({ ...logBase, ...who, status: 503, code: "database_unavailable", ms: Date.now() - started });
+    return errorResponse(503, "database_unavailable", undefined, { "retry-after": String(DATABASE_RETRY_AFTER_SECONDS) });
+  }
+  deps.log({ ...logBase, ...who, status: 500, code: "internal_error", ms: Date.now() - started });
+  return errorResponse(500, "internal_error");
 }

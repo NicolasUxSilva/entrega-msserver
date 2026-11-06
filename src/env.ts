@@ -152,7 +152,8 @@ const schema = z.object({
   ),
 
   // [Acesso] Quem pode entrar pelo login Google (ver src/server/auth/allowlist.ts).
-  // Listas separadas por vírgula. Em PRODUÇÃO, sem nenhuma das duas, ninguém entra.
+  // Listas separadas por vírgula. Restringem só contas NOVAS (quem já tem conta entra);
+  // em PRODUÇÃO, sem nenhuma das duas, contas novas não entram.
   AUTH_ALLOWED_EMAILS: z.preprocess(emptyToUndefined, z.string().min(3).optional()),
   AUTH_ALLOWED_DOMAINS: z.preprocess(emptyToUndefined, z.string().min(3).optional()),
 

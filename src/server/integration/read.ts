@@ -7,7 +7,7 @@
  * `getValidAccessToken`, `runSync`, `runWorkspaceAnalysis` ou
  * `generateCrossSourceInsights` (todas escrevem no banco).
  */
-import { and, asc, eq, gte, lte, max, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte, max, ne, sql } from "drizzle-orm";
 
 import { addDays, todayInTimeZone } from "@/lib/dates";
 import type { CampaignFilters } from "@/lib/campaigns";
@@ -15,10 +15,12 @@ import { previousWindow } from "@/server/campaigns/period";
 import { readCampaignDiagnostics } from "@/server/campaigns/read";
 import { db } from "@/server/db";
 import {
+  connections,
   factAdPerformanceDaily,
   factTrafficDaily,
   insights,
   serviceCredentials,
+  syncRuns,
   workspaces,
 } from "@/server/db/schema";
 import { readSources } from "@/server/diagnostico/read";
@@ -37,6 +39,7 @@ import {
   fromInsightRow,
   sortDiagnostics,
   toContractSource,
+  type SourceRunHistory,
 } from "./map";
 
 export const TIME_ZONE = "America/Sao_Paulo";
@@ -75,8 +78,44 @@ export async function readWorkspace(workspaceId: string): Promise<{ id: string; 
 }
 
 export async function readIntegrationSources(workspaceId: string, now: Date): Promise<Source[]> {
-  const { sources } = await readSources(workspaceId, now);
-  return sources.map(toContractSource);
+  const [{ sources }, history] = await Promise.all([readSources(workspaceId, now), readRunHistory(workspaceId)]);
+  const clock = { now, today: today() };
+  return sources.map((s) => toContractSource(s, history.get(s.key), clock));
+}
+
+/**
+ * Última tentativa e última importação TERMINADA de cada fonte do workspace. Só lê
+ * status e horários de `sync_runs` — nunca `sync_runs.error` (texto bruto do provedor).
+ */
+async function readRunHistory(workspaceId: string): Promise<Map<string, SourceRunHistory>> {
+  const latest = (onlyFinished: boolean) =>
+    db
+      .selectDistinctOn([connections.provider], {
+        provider: connections.provider,
+        status: syncRuns.status,
+        startedAt: syncRuns.startedAt,
+        finishedAt: syncRuns.finishedAt,
+      })
+      .from(syncRuns)
+      .innerJoin(connections, eq(connections.id, syncRuns.connectionId))
+      .where(
+        onlyFinished
+          ? and(eq(connections.workspaceId, workspaceId), ne(syncRuns.status, "running"))
+          : eq(connections.workspaceId, workspaceId),
+      )
+      .orderBy(connections.provider, desc(syncRuns.startedAt));
+  const [attempts, finished] = await Promise.all([latest(false), latest(true)]);
+  const finishedBy = new Map(finished.map((f) => [f.provider, f.status]));
+
+  const out = new Map<string, SourceRunHistory>();
+  for (const a of attempts) {
+    const f = finishedBy.get(a.provider);
+    out.set(a.provider, {
+      lastAttempt: { status: a.status, startedAt: a.startedAt, finishedAt: a.finishedAt },
+      lastFinishedStatus: f && f !== "running" ? f : null,
+    });
+  }
+  return out;
 }
 
 /** GA4 por dia × canal. Paginação por chave (date, channel). */
