@@ -43,6 +43,13 @@
       "when": 1792577977347,
       "tag": "0005_ad_entity_daily",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793822165696,
+      "tag": "0006_service_credentials",
+      "breakpoints": true
     }
   ]
 }
