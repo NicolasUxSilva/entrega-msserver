@@ -13,12 +13,14 @@
 | **Diagnóstico de campanhas** (`/campanhas/diagnosticos`) — Fase 2 | Regras determinísticas (sem IA): investimento sem resultados, custo por resultado, CTR, CPC, queda de resultados, distribuição do investimento e limitações dos dados; severidade × confiança separadas | implementado |
 | **Advisor** (`/advisor`) | Respostas determinísticas sobre o diagnóstico e o Cross-source já calculados; o modo com LLM existe e está **desligado** | implementado (LLM desligado) |
 | **Conexões** (`/conexoes`) | OAuth e importação manual: GA4, Google Ads, Meta Ads, RD Station Marketing, RD Station CRM | implementado; contas da MS Server **a conectar** nesta instalação |
+| **API de integração v1** (`/api/integration/v1/*`) | Leitura privada para a Gestão Inteligente: fontes com atualidade (`freshness`), tráfego GA4, mídia paga e diagnósticos de UM workspace, por credencial `marketing:read`. Contrato: `docs/integracao-gestao-v1.md` | implementado e validado localmente; **não publicado**, nenhuma credencial real emitida |
+| **Sincronização diária** (`/api/cron/sync`) | Vercel Cron às 06:00 (Brasília) para os workspaces listados; trava contra importações simultâneas | implementado e validado localmente; **não publicado** |
 
 Detalhes técnicos e decisões: `PROJECT_STATE.md` (§19 Fase 1, §20 Fase 2, §21 esta separação) e
 `docs/v1-architecture.md` (invariantes INV-1 a INV-26).
 
 **O que NÃO está nesta entrega:** Fase 3 em diante (qualidade comercial, CRM × campanhas, criativos, histórico de
-decisões), cobrança, convites/múltiplos usuários num mesmo workspace, importação agendada.
+decisões), cobrança, convites/múltiplos usuários num mesmo workspace.
 
 ## 2. Arquitetura e dependências
 
@@ -53,6 +55,10 @@ Defina-as na Vercel (Project → Settings → Environment Variables, ambiente **
 | `RD_CRM_CLIENT_ID` / `RD_CRM_CLIENT_SECRET` | não | app privado RD Station CRM **da MS Server** |
 | `ADVISOR_ENABLED` | não | `true` (determinístico) |
 | `ADVISOR_LLM_ENABLED` / `ANTHROPIC_API_KEY` | não | `false` / vazio — o modo LLM nunca foi validado com geração real e gera custo |
+| `AUTH_ALLOWED_EMAILS` / `AUTH_ALLOWED_DOMAINS` | recomendado | quem pode **criar conta** (e-mails / domínios exatos, separados por vírgula). Quem já tem conta entra sempre. Sem nenhuma lista, em produção, contas novas não entram |
+| `CRON_SECRET` | para a sincronização diária | segredo **próprio**, 32+ caracteres (`openssl rand -base64 32`); ausente = rota do cron desligada (503) |
+| `SCHEDULED_SYNC_WORKSPACE_IDS` | para a sincronização diária | uuid(s) do(s) workspace(s) sincronizados todo dia; vazio = nenhum |
+| `SCHEDULED_SYNC_BUDGET_SECONDS` | não | orçamento por execução (padrão 270; plano Hobby: até 50) |
 
 **Isolamento:** esta instalação **não deve** usar o banco, o `AUTH_SECRET`, a `APP_ENCRYPTION_KEY` nem os apps OAuth
 do SaaS de origem. Cada um é criado do zero, sob contas da MS Server.
@@ -74,9 +80,11 @@ Escopos pedidos: login (`openid email profile`), GA4 (`analytics.readonly`), Goo
 
 ### Política de acesso (importante)
 
-O login aceita **qualquer conta Google** que o OAuth permitir, e cada pessoa recebe **o próprio workspace** (não há
-convites nem workspace compartilhado nesta versão — isso é funcionalidade futura). Para restringir quem entra **sem
-mudar código**:
+Com a integração v1, o login passou a seguir esta regra (`src/server/auth/allowlist.ts`): e-mail verificado pelo
+Google é obrigatório; **quem já tem conta entra sempre**; **contas novas** só pelas listas `AUTH_ALLOWED_EMAILS` /
+`AUTH_ALLOWED_DOMAINS`; sem lista, em produção, contas novas não entram. Cada pessoa continua recebendo **o próprio
+workspace** (não há convites nem workspace compartilhado nesta versão — isso é funcionalidade futura). Revise a tabela
+`users` antes de publicar: o cadastro era aberto. Restrições adicionais **sem mudar código**:
 - **Recomendado:** se a MS Server usa Google Workspace, configure a tela de consentimento OAuth como **Interna** —
   só contas do domínio da empresa conseguem logar.
 - Alternativa: deixar o app OAuth em **Testing** com a lista de usuários de teste (limite de 100; o refresh token do
@@ -88,12 +96,18 @@ o usuário responsável antes de conectar.
 ## 5. Banco de dados e migrações
 
 - Banco **novo e vazio** da MS Server (ex.: projeto próprio no Neon, na conta da empresa).
-- Migrações versionadas em `src/server/db/migrations/` (0000 → 0005). Num banco novo:
+- Migrações versionadas em `src/server/db/migrations/` (0000 → 0006). Num banco novo:
   ```bash
   DATABASE_URL=<banco da MS Server> pnpm db:migrate
   ```
   Verificado em 2026-10-23 num Postgres 16 vazio descartável: as 6 migrações aplicam (14 tabelas) e uma 2ª execução
   não faz nada. A 0005 (`fact_ad_entity_daily`) é aditiva e necessária para o detalhe por grupo/conjunto e anúncio.
+- **0006 (`service_credentials`)** — integração v1. Só cria uma tabela (FK para `workspaces`, `ON DELETE CASCADE`) e
+  dois índices; não altera nem apaga nada. Verificado em 2026-11-06 num Postgres 17 descartável: num banco vazio as 7
+  migrações aplicam (15 tabelas); num banco **no estado 0005 com dados**, a 0006 aplica e os dados existentes ficam
+  idênticos; a 2ª execução não faz nada; `drizzle-kit generate` não encontra diferença entre schema e migrações.
+  Antes de aplicar num banco real: backup/branch do Neon e leitura de `drizzle.__drizzle_migrations` (deve ter 6
+  linhas, a última com `created_at = 1792577977347`).
 - **A Vercel não aplica migrações.** Aplique antes (ou logo depois) do primeiro deploy, sempre com a URL do banco da
   MS Server em mãos — confira o host antes de rodar.
 - Backup: ative o histórico/ponto de restauração do provedor (no Neon, *point-in-time restore*) antes de qualquer
@@ -164,7 +178,10 @@ Aplicado: o nome **"MS Server"** na barra lateral, no login e nos títulos das p
   banco sintético descartável. Meta Ads nunca foi conectado com um app real no projeto de origem.
 - Limiares do diagnóstico de campanhas ainda não calibrados com dados reais (`src/server/campaigns/diagnostics/thresholds.ts`).
 - Um usuário por workspace; sem convites; sem papéis efetivos.
-- Importação manual (sem agendamento); Meta não informa status de campanha; Performance Max sem grupos de recursos.
+- Sincronização diária implementada, mas **não publicada nem validada com contas reais**; Meta não informa status de
+  campanha; Performance Max sem grupos de recursos.
+- API de integração: limite de requisições **em memória, por instância** (proteção contra laço do cliente, não um
+  limite global); sem registro de último uso da credencial; execuções do cron gravadas com `trigger = manual`.
 - Advisor com LLM desligado e nunca validado com geração real.
 
 ## 11. Diferenças em relação ao SaaS independente

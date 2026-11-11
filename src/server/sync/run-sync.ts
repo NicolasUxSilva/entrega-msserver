@@ -35,6 +35,7 @@ import {
 import { addDays, maxDate, todayInTimeZone } from "@/lib/dates";
 
 import { DETAIL_ERROR_PREFIX, detailWindowStart } from "./detail-window";
+import { claimSyncRun } from "./lock";
 import { normalizeBatch } from "./normalize";
 
 const HISTORY_DAYS = 180;
@@ -47,6 +48,11 @@ export interface SyncResult {
   periodStart: string;
   periodEnd: string;
   error: string | null;
+  /**
+   * `true` = NÃO rodou porque outra importação da mesma conexão está em andamento
+   * (`status` vem `failed` para a UI mostrar o aviso; nenhum dado foi tocado).
+   */
+  alreadyRunning?: true;
 }
 
 export async function runSync(input: {
@@ -100,18 +106,22 @@ export async function runSync(input: {
     : historyStart;
   const trigger: "manual" | "initial" = conn.lastSyncedAt ? "manual" : "initial";
 
-  // ── sync_run ─────────────────────────────────────────────────────
-  const [run] = await db
-    .insert(syncRuns)
-    .values({
-      connectionId: conn.id,
-      trigger,
-      status: "running",
+  // ── sync_run (com trava: uma importação por conexão de cada vez — ./lock) ──
+  const claim = await claimSyncRun({ connectionId: conn.id, trigger, periodStart: since, periodEnd: until });
+  if (!claim.claimed) {
+    // não cria sync_run nem toca em nada: a importação em andamento segue sozinha
+    return {
+      syncRunId: "",
+      status: "failed",
+      rowsIn: 0,
+      rowsWritten: 0,
       periodStart: since,
       periodEnd: until,
-    })
-    .returning({ id: syncRuns.id });
-  if (!run) throw new Error("Falha ao criar sync_run.");
+      error: "Já existe uma importação em andamento para esta conexão. Aguarde ela terminar e tente de novo.",
+      alreadyRunning: true,
+    };
+  }
+  const run = { id: claim.runId };
 
   try {
     const accessToken = await getValidAccessToken(conn.id);

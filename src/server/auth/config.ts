@@ -13,7 +13,8 @@ import Google from "next-auth/providers/google";
 
 import { env } from "@/env";
 
-import { ensureUserAndWorkspace } from "./provision";
+import { decideSignIn, normalizeEmail, parseList } from "./allowlist";
+import { ensureUserAndWorkspace, userExistsByEmail } from "./provision";
 import "./types"; // augmentação de Session / JWT
 
 export const authConfig = {
@@ -30,9 +31,28 @@ export const authConfig = {
     }),
   ],
   callbacks: {
-    signIn({ user }) {
-      // Sem e-mail do Google não há como identificar/associar o usuário.
-      return Boolean(user?.email);
+    async signIn({ user, profile }) {
+      // E-mail verificado pelo Google é obrigatório. Quem já tem conta entra sempre; conta
+      // nova só pela lista de e-mails/domínios autorizados (ver ./allowlist).
+      const email = normalizeEmail(user?.email);
+      const decision = decideSignIn(
+        {
+          email,
+          emailVerified: typeof profile?.email_verified === "boolean" ? profile.email_verified : undefined,
+          existingUser: email ? await userExistsByEmail(email) : false,
+        },
+        {
+          emails: parseList(env.AUTH_ALLOWED_EMAILS),
+          domains: parseList(env.AUTH_ALLOWED_DOMAINS),
+          production: env.NODE_ENV === "production",
+        },
+      );
+      if (!decision.allowed) {
+        // sem o e-mail completo no log: só o domínio e o motivo
+        const domain = email ? email.slice(email.lastIndexOf("@") + 1) : null;
+        console.info(JSON.stringify({ event: "sign_in_denied", reason: decision.reason, domain }));
+      }
+      return decision.allowed;
     },
     async jwt({ token, user }) {
       // `user` só é populado no primeiro passo do login.
